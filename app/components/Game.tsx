@@ -483,6 +483,200 @@ function createPlayer(spawn: { x: number; y: number }): Player {
   };
 }
 
+// ─── Sound Effects (Web Audio API) ───────────────────────────────────────────
+let audioCtx: AudioContext | null = null;
+
+function getAudioCtx(): AudioContext {
+  if (!audioCtx) audioCtx = new AudioContext();
+  return audioCtx;
+}
+
+function sfx(type: "jump" | "walljump" | "dash" | "death" | "strawberry" | "spring" | "land" | "crumble" | "roomenter" | "win") {
+  try {
+    const ctx = getAudioCtx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    const t = ctx.currentTime;
+
+    switch (type) {
+      case "jump":
+        osc.type = "square";
+        osc.frequency.setValueAtTime(280, t);
+        osc.frequency.linearRampToValueAtTime(560, t + 0.08);
+        gain.gain.setValueAtTime(0.12, t);
+        gain.gain.linearRampToValueAtTime(0, t + 0.1);
+        osc.start(t); osc.stop(t + 0.1);
+        break;
+
+      case "walljump":
+        osc.type = "square";
+        osc.frequency.setValueAtTime(200, t);
+        osc.frequency.linearRampToValueAtTime(600, t + 0.06);
+        osc.frequency.linearRampToValueAtTime(400, t + 0.12);
+        gain.gain.setValueAtTime(0.12, t);
+        gain.gain.linearRampToValueAtTime(0, t + 0.12);
+        osc.start(t); osc.stop(t + 0.12);
+        break;
+
+      case "dash": {
+        // Whoosh noise
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 0.15, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) {
+          data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+        }
+        const noise = ctx.createBufferSource();
+        noise.buffer = buf;
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.15, t);
+        noiseGain.gain.linearRampToValueAtTime(0, t + 0.15);
+        const filter = ctx.createBiquadFilter();
+        filter.type = "bandpass";
+        filter.frequency.setValueAtTime(2000, t);
+        filter.frequency.linearRampToValueAtTime(500, t + 0.15);
+        filter.Q.value = 2;
+        noise.connect(filter);
+        filter.connect(noiseGain);
+        noiseGain.connect(ctx.destination);
+        noise.start(t); noise.stop(t + 0.15);
+        // Tonal component
+        osc.type = "sawtooth";
+        osc.frequency.setValueAtTime(150, t);
+        osc.frequency.linearRampToValueAtTime(80, t + 0.1);
+        gain.gain.setValueAtTime(0.08, t);
+        gain.gain.linearRampToValueAtTime(0, t + 0.1);
+        osc.start(t); osc.stop(t + 0.1);
+        break;
+      }
+
+      case "death": {
+        // Descending crunch
+        osc.type = "square";
+        osc.frequency.setValueAtTime(400, t);
+        osc.frequency.linearRampToValueAtTime(80, t + 0.3);
+        gain.gain.setValueAtTime(0.15, t);
+        gain.gain.linearRampToValueAtTime(0, t + 0.3);
+        osc.start(t); osc.stop(t + 0.3);
+        // Noise burst
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+        const noise = ctx.createBufferSource();
+        noise.buffer = buf;
+        const ng = ctx.createGain();
+        ng.gain.setValueAtTime(0.2, t);
+        ng.gain.linearRampToValueAtTime(0, t + 0.12);
+        noise.connect(ng); ng.connect(ctx.destination);
+        noise.start(t); noise.stop(t + 0.12);
+        break;
+      }
+
+      case "strawberry": {
+        // Sparkly ascending chime
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(523, t); // C5
+        osc.frequency.setValueAtTime(659, t + 0.08); // E5
+        osc.frequency.setValueAtTime(784, t + 0.16); // G5
+        osc.frequency.setValueAtTime(1047, t + 0.24); // C6
+        gain.gain.setValueAtTime(0.12, t);
+        gain.gain.setValueAtTime(0.12, t + 0.28);
+        gain.gain.linearRampToValueAtTime(0, t + 0.4);
+        osc.start(t); osc.stop(t + 0.4);
+        // Harmony
+        const osc2 = ctx.createOscillator();
+        const g2 = ctx.createGain();
+        osc2.connect(g2); g2.connect(ctx.destination);
+        osc2.type = "sine";
+        osc2.frequency.setValueAtTime(659, t + 0.08);
+        osc2.frequency.setValueAtTime(784, t + 0.16);
+        osc2.frequency.setValueAtTime(1047, t + 0.24);
+        osc2.frequency.setValueAtTime(1319, t + 0.32);
+        g2.gain.setValueAtTime(0.06, t + 0.08);
+        g2.gain.linearRampToValueAtTime(0, t + 0.45);
+        osc2.start(t + 0.08); osc2.stop(t + 0.45);
+        break;
+      }
+
+      case "spring":
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(200, t);
+        osc.frequency.exponentialRampToValueAtTime(800, t + 0.12);
+        osc.frequency.exponentialRampToValueAtTime(400, t + 0.2);
+        gain.gain.setValueAtTime(0.15, t);
+        gain.gain.linearRampToValueAtTime(0, t + 0.2);
+        osc.start(t); osc.stop(t + 0.2);
+        break;
+
+      case "land":
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(120, t);
+        osc.frequency.linearRampToValueAtTime(60, t + 0.06);
+        gain.gain.setValueAtTime(0.08, t);
+        gain.gain.linearRampToValueAtTime(0, t + 0.06);
+        osc.start(t); osc.stop(t + 0.06);
+        break;
+
+      case "crumble": {
+        const buf = ctx.createBuffer(1, ctx.sampleRate * 0.2, ctx.sampleRate);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length) * 0.5;
+        const noise = ctx.createBufferSource();
+        noise.buffer = buf;
+        const ng = ctx.createGain();
+        ng.gain.setValueAtTime(0.15, t);
+        ng.gain.linearRampToValueAtTime(0, t + 0.2);
+        const filt = ctx.createBiquadFilter();
+        filt.type = "lowpass"; filt.frequency.value = 800;
+        noise.connect(filt); filt.connect(ng); ng.connect(ctx.destination);
+        noise.start(t); noise.stop(t + 0.2);
+        gain.gain.setValueAtTime(0, t); // silence the main osc
+        osc.start(t); osc.stop(t + 0.01);
+        break;
+      }
+
+      case "roomenter":
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(440, t);
+        osc.frequency.setValueAtTime(554, t + 0.1);
+        osc.frequency.setValueAtTime(659, t + 0.2);
+        gain.gain.setValueAtTime(0.08, t);
+        gain.gain.linearRampToValueAtTime(0, t + 0.35);
+        osc.start(t); osc.stop(t + 0.35);
+        break;
+
+      case "win": {
+        // Victory fanfare
+        const notes = [523, 659, 784, 1047, 784, 1047];
+        const dur = 0.15;
+        osc.type = "square";
+        for (let i = 0; i < notes.length; i++) {
+          osc.frequency.setValueAtTime(notes[i], t + i * dur);
+        }
+        gain.gain.setValueAtTime(0.1, t);
+        gain.gain.setValueAtTime(0.1, t + notes.length * dur - 0.05);
+        gain.gain.linearRampToValueAtTime(0, t + notes.length * dur + 0.3);
+        osc.start(t); osc.stop(t + notes.length * dur + 0.3);
+        // Harmony layer
+        const osc2 = ctx.createOscillator();
+        const g2 = ctx.createGain();
+        osc2.connect(g2); g2.connect(ctx.destination);
+        osc2.type = "sine";
+        for (let i = 0; i < notes.length; i++) {
+          osc2.frequency.setValueAtTime(notes[i] * 0.5, t + i * dur);
+        }
+        g2.gain.setValueAtTime(0.06, t);
+        g2.gain.linearRampToValueAtTime(0, t + notes.length * dur + 0.3);
+        osc2.start(t); osc2.stop(t + notes.length * dur + 0.3);
+        break;
+      }
+    }
+  } catch {
+    // Audio not available — silently ignore
+  }
+}
+
 // ─── Drawing ─────────────────────────────────────────────────────────────────
 function drawBg(ctx: CanvasRenderingContext2D, roomIdx: number, time: number) {
   // Gradient shifts per room for variety
@@ -758,6 +952,7 @@ export default function Game() {
     p.deadTimer = 20;
     gs.deaths++;
     gs.screenShake = 8;
+    sfx("death");
     spawnParticles(gs, p.x + PW / 2, p.y + PH / 2, p.hairColor, 20, 8);
     spawnParticles(gs, p.x + PW / 2, p.y + PH / 2, "#fff", 10, 6);
   }, [spawnParticles]);
@@ -876,6 +1071,7 @@ export default function Game() {
         p.coyoteTimer = 0;
         p.jumpBuffer = 0;
         p.jumpHeld = true;
+        sfx("jump");
         spawnParticles(gs, p.x + PW / 2, p.y + PH, "rgba(255,255,255,0.5)", 4);
       } else if (p.jumpBuffer > 0 && p.wallDir !== 0) {
         // Wall jump
@@ -886,6 +1082,7 @@ export default function Game() {
         p.jumpBuffer = 0;
         p.jumpHeld = true;
         p.canDash = true;
+        sfx("walljump");
         spawnParticles(gs, p.x + (p.facing < 0 ? PW : 0), p.y + PH / 2, "rgba(255,255,255,0.5)", 5);
       }
 
@@ -908,6 +1105,7 @@ export default function Game() {
       p.dashCooldown = DASH_COOLDOWN;
       p.hairColor = "#7ec8e3"; // blue while dash is used
       gs.screenShake = 3;
+      sfx("dash");
       spawnParticles(gs, p.x + PW / 2, p.y + PH / 2, "#7ec8e3", 8, 3);
     }
 
@@ -963,7 +1161,10 @@ export default function Game() {
           p.grounded = true;
           p.canDash = true;
           p.hairColor = "#E84855"; // reset hair color
-          if (p.vy > 4) spawnParticles(gs, p.x + PW / 2, p.y + PH, "rgba(255,255,255,0.4)", 3);
+          if (p.vy > 4) {
+            spawnParticles(gs, p.x + PW / 2, p.y + PH, "rgba(255,255,255,0.4)", 3);
+            sfx("land");
+          }
         } else if (p.vy < 0) {
           p.y = plat.y + plat.h;
         }
@@ -1007,6 +1208,7 @@ export default function Game() {
         if (c.timer <= 0) {
           c.visible = false;
           c.respawnTimer = CRUMBLE_RESPAWN;
+          sfx("crumble");
           spawnParticles(gs, c.x + c.w / 2, c.y + TILE / 2, "#4a3a2a", 8, 4);
         }
       }
@@ -1021,6 +1223,7 @@ export default function Game() {
         p.canDash = true;
         p.hairColor = "#E84855";
         s.activated = 15;
+        sfx("spring");
         spawnParticles(gs, s.x + 10, s.y, "#f1c40f", 6, 5);
       }
     }
@@ -1042,6 +1245,7 @@ export default function Game() {
       if (Math.sqrt(dx * dx + dy * dy) < 16) {
         s.collected = true;
         gs.strawberriesCollected++;
+        sfx("strawberry");
         spawnParticles(gs, s.x, s.y, "#e84855", 10, 5);
         spawnParticles(gs, s.x, s.y, "#2ecc71", 5, 3);
       }
@@ -1058,9 +1262,11 @@ export default function Game() {
     if (p.x >= room.exitX && p.grounded) {
       if (gs.currentRoom < gs.rooms.length - 1) {
         enterRoom(gs, gs.currentRoom + 1);
+        sfx("roomenter");
       } else {
         gs.status = "win";
         setStatus("win");
+        sfx("win");
       }
       prevKeysRef.current = new Set(keys);
       return;
