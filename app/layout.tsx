@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Pixel Runner - Arcade Platformer",
-  description: "A 2D arcade platformer game built with Next.js and HTML Canvas",
+  title: "Summit - Celeste-Inspired Platformer",
+  description: "A precision platformer with dash, wall-jump, and screen-by-screen rooms",
 };
 
 export default function RootLayout({
