@@ -110,7 +110,7 @@ interface GameState {
   totalStrawberries: number;
   particles: Particle[];
   snow: Snowflake[];
-  status: "menu" | "playing" | "win" | "shop";
+  status: "menu" | "playing" | "win" | "shop" | "offer";
   screenShake: number;
   time: number;
   // Economy
@@ -127,6 +127,8 @@ interface GameState {
   slowMoFrames: number;
   springBoostActive: boolean;
   starterPackBought: boolean;
+  roomDeaths: number;
+  offerBooster: BoosterType | null; // which booster to offer
 }
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
@@ -555,7 +557,7 @@ export default function Game() {
   const keysRef = useRef<Set<string>>(new Set());
   const prevKeysRef = useRef<Set<string>>(new Set());
   const animRef = useRef<number>(0);
-  const [status, setStatus] = useState<"menu" | "playing" | "win" | "shop">("menu");
+  const [status, setStatus] = useState<"menu" | "playing" | "win" | "shop" | "offer">("menu");
   const [shopTab, setShopTab] = useState<"boosters" | "cosmetics">("boosters");
   const [, forceUpdate] = useState(0);
   const [savedCoins, setSavedCoins] = useState(0);
@@ -600,11 +602,21 @@ export default function Game() {
     }
     const p = gs.player;
     p.dead = true; p.deadTimer = 20;
-    gs.deaths++; gs.screenShake = 8;
+    gs.deaths++; gs.roomDeaths++; gs.screenShake = 8;
     sfx("death");
     const colors = getDeathColors(gs);
     spawnParticles(gs, p.x + PW / 2, p.y + PH / 2, colors[0], 20, 8);
     spawnParticles(gs, p.x + PW / 2, p.y + PH / 2, colors[1], 10, 6);
+
+    // Death-triggered offer: every 3 deaths in a room, if no active booster and has coins
+    if (gs.roomDeaths % 3 === 0 && !gs.activeBooster && gs.coins >= 3) {
+      // Pick the best booster to offer based on room deaths
+      const offer: BoosterType = gs.roomDeaths >= 9 ? "shield" :
+        gs.roomDeaths >= 6 ? "doubleDash" : "shield";
+      gs.offerBooster = offer;
+      // Show offer after respawn (delay via deadTimer)
+      p.deadTimer = 25; // slightly longer to let particles settle
+    }
   }, [spawnParticles]);
 
   const respawnPlayer = useCallback((gs: GameState) => {
@@ -619,12 +631,12 @@ export default function Game() {
   const enterRoom = useCallback((gs: GameState, roomIdx: number) => {
     gs.currentRoom = roomIdx;
     gs.player = createPlayer(gs.rooms[roomIdx].spawn, getHairColor(gs));
-    // Clear room-scoped boosters
     gs.checkpoint = null;
     gs.doubleDashActive = false;
     gs.springBoostActive = false;
     gs.slowMoFrames = 0;
-    // Keep shield across rooms
+    gs.roomDeaths = 0;
+    gs.offerBooster = null;
   }, []);
 
   const initGame = useCallback(() => {
@@ -645,6 +657,7 @@ export default function Game() {
       activeBooster: null, shieldActive: false, doubleDashActive: false,
       checkpoint: null, slowMoFrames: 0, springBoostActive: false,
       starterPackBought: save.starterPack,
+      roomDeaths: 0, offerBooster: null,
     };
     gsRef.current = gs;
     setStatus("playing");
@@ -713,7 +726,16 @@ export default function Game() {
     // Death timer
     if (p.dead) {
       p.deadTimer--;
-      if (p.deadTimer <= 0) respawnPlayer(gs);
+      if (p.deadTimer <= 0) {
+        respawnPlayer(gs);
+        // Show offer popup if one is queued
+        if (gs.offerBooster) {
+          gs.status = "offer";
+          setStatus("offer");
+          prevKeysRef.current = new Set(keys);
+          return;
+        }
+      }
       gs.particles = gs.particles.filter(part => { part.x += part.vx; part.y += part.vy; part.vy += 0.1; part.life -= 0.04; return part.life > 0; });
       prevKeysRef.current = new Set(keys); return;
     }
@@ -1072,6 +1094,58 @@ export default function Game() {
             )}
           </div>
         )}
+
+        {/* Death-triggered offer */}
+        {status === "offer" && gs && gs.offerBooster && (() => {
+          const booster = BOOSTERS.find(b => b.id === gs.offerBooster);
+          if (!booster) return null;
+          const canAfford = gs.coins >= booster.cost;
+          return (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/70 rounded-lg" style={{ fontFamily: "monospace" }}>
+              <div className="bg-gray-900 border border-yellow-500/40 rounded-xl p-5 max-w-xs text-center shadow-2xl shadow-yellow-900/20">
+                <p className="text-gray-400 text-xs mb-2">Struggling? Try a boost!</p>
+                <div className="flex items-center justify-center gap-2 mb-3">
+                  <span className="text-2xl">{booster.icon}</span>
+                  <span className="text-white font-bold text-lg">{booster.name}</span>
+                </div>
+                <p className="text-gray-400 text-xs mb-4">{booster.desc}</p>
+                <div className="flex gap-2 justify-center">
+                  <button
+                    onClick={() => {
+                      if (canAfford) {
+                        gs.coins -= booster.cost;
+                        gs.activeBooster = booster.id;
+                        if (booster.id === "shield") gs.shieldActive = true;
+                        if (booster.id === "doubleDash") gs.doubleDashActive = true;
+                        if (booster.id === "springBoost") gs.springBoostActive = true;
+                        sfx("buy");
+                        writeSave(gs);
+                      }
+                      gs.offerBooster = null;
+                      gs.status = "playing";
+                      setStatus("playing");
+                    }}
+                    disabled={!canAfford}
+                    className={`px-4 py-2 rounded font-bold text-sm ${canAfford ? "bg-yellow-600 hover:bg-yellow-500 text-white" : "bg-gray-700 text-gray-500 cursor-not-allowed"}`}
+                  >
+                    {canAfford ? `🪙 ${booster.cost} — BUY` : `Need ${booster.cost} coins`}
+                  </button>
+                  <button
+                    onClick={() => {
+                      gs.offerBooster = null;
+                      gs.status = "playing";
+                      setStatus("playing");
+                    }}
+                    className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-400 rounded font-bold text-sm"
+                  >
+                    No thanks
+                  </button>
+                </div>
+                <p className="text-gray-600 text-xs mt-3">🪙 {gs.coins} coins</p>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       <div className="flex items-center gap-4 text-gray-600 text-xs" style={{ fontFamily: "monospace" }}>
