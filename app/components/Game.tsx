@@ -260,6 +260,155 @@ function sfx(type: string) {
   } catch { /* ignore */ }
 }
 
+// ─── Chiptune BGM (I–V–vi–IV in C major) ─────────────────────────────────────
+// Notes: C=262, D=294, E=330, F=349, G=392, A=440, B=494
+// Chords: I=C(C-E-G), V=G(G-B-D), vi=Am(A-C-E), IV=F(F-A-C)
+const CHORD_PROG = [
+  { root: 131, notes: [262, 330, 392] },  // I  = C  (C4, E4, G4)
+  { root: 98,  notes: [196, 247, 294] },  // V  = G  (G3, B3, D4)
+  { root: 110, notes: [220, 262, 330] },  // vi = Am (A3, C4, E4)
+  { root: 87.3, notes: [175, 220, 262] }, // IV = F  (F3, A3, C4)
+];
+
+// Melody patterns per chord (scale degrees as freq multipliers from root*2)
+const MELODIES = [
+  // I: C major arpeggio + passing tones
+  [523, 659, 784, 659, 523, 784, 659, 523],
+  // V: G major rising
+  [392, 494, 587, 494, 784, 587, 494, 392],
+  // vi: Am descending
+  [659, 523, 440, 523, 659, 523, 440, 330],
+  // IV: F major bouncy
+  [349, 440, 523, 440, 349, 523, 440, 349],
+];
+
+let bgmPlaying = false;
+let bgmTimeout: ReturnType<typeof setTimeout> | null = null;
+let bgmGainNode: GainNode | null = null;
+
+function startBGM() {
+  if (bgmPlaying) return;
+  bgmPlaying = true;
+
+  const ctx = getAudioCtx();
+  bgmGainNode = ctx.createGain();
+  bgmGainNode.gain.value = 0.08;
+  bgmGainNode.connect(ctx.destination);
+
+  const BPM = 120;
+  const beatDur = 60 / BPM; // 0.5s per beat
+  const barDur = beatDur * 4; // 2s per bar
+  const loopDur = barDur * 4; // 8s per loop (4 chords)
+
+  function scheduleLoop() {
+    if (!bgmPlaying || !bgmGainNode) return;
+    const ctx = getAudioCtx();
+    const now = ctx.currentTime + 0.05;
+
+    for (let ci = 0; ci < 4; ci++) {
+      const chord = CHORD_PROG[ci];
+      const barStart = now + ci * barDur;
+
+      // Bass (triangle wave, root note, whole bar)
+      const bass = ctx.createOscillator();
+      const bassGain = ctx.createGain();
+      bass.type = "triangle";
+      bass.frequency.value = chord.root;
+      bassGain.gain.setValueAtTime(0.12, barStart);
+      bassGain.gain.setValueAtTime(0.12, barStart + barDur - 0.05);
+      bassGain.gain.linearRampToValueAtTime(0, barStart + barDur);
+      bass.connect(bassGain);
+      bassGain.connect(bgmGainNode!);
+      bass.start(barStart);
+      bass.stop(barStart + barDur);
+
+      // Chord arpeggio (square wave, 8th notes)
+      for (let n = 0; n < 8; n++) {
+        const noteStart = barStart + n * (beatDur / 2);
+        const noteFreq = chord.notes[n % chord.notes.length];
+        const arp = ctx.createOscillator();
+        const arpGain = ctx.createGain();
+        arp.type = "square";
+        arp.frequency.value = noteFreq;
+        arpGain.gain.setValueAtTime(0.04, noteStart);
+        arpGain.gain.linearRampToValueAtTime(0, noteStart + beatDur / 2 - 0.02);
+        arp.connect(arpGain);
+        arpGain.connect(bgmGainNode!);
+        arp.start(noteStart);
+        arp.stop(noteStart + beatDur / 2);
+      }
+
+      // Melody (pulse/square, 8th notes)
+      const melody = MELODIES[ci];
+      for (let n = 0; n < melody.length; n++) {
+        const noteStart = barStart + n * (beatDur / 2);
+        const mel = ctx.createOscillator();
+        const melGain = ctx.createGain();
+        mel.type = "square";
+        mel.frequency.value = melody[n];
+        melGain.gain.setValueAtTime(0.06, noteStart);
+        melGain.gain.setValueAtTime(0.06, noteStart + beatDur / 2 - 0.06);
+        melGain.gain.linearRampToValueAtTime(0, noteStart + beatDur / 2 - 0.01);
+        mel.connect(melGain);
+        melGain.connect(bgmGainNode!);
+        mel.start(noteStart);
+        mel.stop(noteStart + beatDur / 2);
+      }
+
+      // Kick drum on beats 1 and 3 (noise + low osc)
+      for (let beat = 0; beat < 4; beat += 2) {
+        const kickTime = barStart + beat * beatDur;
+        const kickOsc = ctx.createOscillator();
+        const kickGain = ctx.createGain();
+        kickOsc.type = "sine";
+        kickOsc.frequency.setValueAtTime(150, kickTime);
+        kickOsc.frequency.exponentialRampToValueAtTime(40, kickTime + 0.08);
+        kickGain.gain.setValueAtTime(0.15, kickTime);
+        kickGain.gain.linearRampToValueAtTime(0, kickTime + 0.1);
+        kickOsc.connect(kickGain);
+        kickGain.connect(bgmGainNode!);
+        kickOsc.start(kickTime);
+        kickOsc.stop(kickTime + 0.1);
+      }
+
+      // Hi-hat on every 8th note (noise)
+      for (let n = 0; n < 8; n++) {
+        const hatTime = barStart + n * (beatDur / 2);
+        const hatBuf = ctx.createBuffer(1, ctx.sampleRate * 0.03, ctx.sampleRate);
+        const hatData = hatBuf.getChannelData(0);
+        for (let i = 0; i < hatData.length; i++) hatData[i] = (Math.random() * 2 - 1) * (1 - i / hatData.length);
+        const hat = ctx.createBufferSource();
+        hat.buffer = hatBuf;
+        const hatGain = ctx.createGain();
+        const hatFilter = ctx.createBiquadFilter();
+        hatFilter.type = "highpass";
+        hatFilter.frequency.value = 8000;
+        hatGain.gain.setValueAtTime(n % 2 === 0 ? 0.04 : 0.02, hatTime);
+        hatGain.gain.linearRampToValueAtTime(0, hatTime + 0.03);
+        hat.connect(hatFilter);
+        hatFilter.connect(hatGain);
+        hatGain.connect(bgmGainNode!);
+        hat.start(hatTime);
+        hat.stop(hatTime + 0.03);
+      }
+    }
+
+    // Schedule next loop
+    bgmTimeout = setTimeout(scheduleLoop, loopDur * 1000 - 100);
+  }
+
+  scheduleLoop();
+}
+
+function stopBGM() {
+  bgmPlaying = false;
+  if (bgmTimeout) { clearTimeout(bgmTimeout); bgmTimeout = null; }
+  if (bgmGainNode) {
+    try { bgmGainNode.gain.linearRampToValueAtTime(0, getAudioCtx().currentTime + 0.5); } catch { /* ignore */ }
+    bgmGainNode = null;
+  }
+}
+
 // ─── Drawing ─────────────────────────────────────────────────────────────────
 function drawBg(ctx: CanvasRenderingContext2D, roomIdx: number) {
   const r1 = 10 + Math.sin(roomIdx * 0.3) * 5, g1 = 10 + roomIdx * 2, b1 = 30 + roomIdx * 5;
@@ -384,6 +533,9 @@ export default function Game() {
   const [status, setStatus] = useState<"menu" | "playing" | "win" | "shop">("menu");
   const [shopTab, setShopTab] = useState<"boosters" | "cosmetics">("boosters");
   const [, forceUpdate] = useState(0);
+  const [savedCoins, setSavedCoins] = useState(0);
+
+  useEffect(() => { setSavedCoins(loadSave().coins); }, []);
 
   const justPressed = useCallback((key: string) => keysRef.current.has(key) && !prevKeysRef.current.has(key), []);
 
@@ -451,6 +603,7 @@ export default function Game() {
     };
     gsRef.current = gs;
     setStatus("playing");
+    startBGM();
   }, []);
 
   const buyBooster = useCallback((id: BoosterType) => {
@@ -648,7 +801,7 @@ export default function Game() {
         enterRoom(gs, gs.currentRoom + 1); sfx("roomenter");
       } else {
         gs.coins += 5;
-        gs.status = "win"; setStatus("win"); sfx("win");
+        gs.status = "win"; setStatus("win"); sfx("win"); stopBGM();
       }
       writeSave(gs); prevKeysRef.current = new Set(keys); return;
     }
@@ -665,7 +818,7 @@ export default function Game() {
     gs.particles = gs.particles.filter(part => { part.x += part.vx; part.y += part.vy; part.vy += 0.08; part.life -= 0.03; return part.life > 0; });
 
     // Open shop with Tab
-    if (justPressed("Tab")) { gs.status = "shop"; setStatus("shop"); }
+    if (justPressed("Tab")) { gs.status = "shop"; setStatus("shop"); stopBGM(); }
 
     prevKeysRef.current = new Set(keys);
   }, [justPressed, spawnParticles, killPlayer, respawnPlayer, enterRoom]);
@@ -717,7 +870,7 @@ export default function Game() {
               <button onClick={initGame} className="px-8 py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-lg rounded transition-colors" style={{ fontFamily: "monospace" }}>CLIMB</button>
               <button onClick={() => { if (!gsRef.current) initGame(); setStatus("shop"); if (gsRef.current) gsRef.current.status = "shop"; }} className="px-6 py-3 bg-yellow-600/80 hover:bg-yellow-500 text-white font-bold text-lg rounded transition-colors" style={{ fontFamily: "monospace" }}>🪙 SHOP</button>
             </div>
-            <p className="text-yellow-400 text-sm mb-4" style={{ fontFamily: "monospace" }}>🪙 {loadSave().coins} coins</p>
+            <p className="text-yellow-400 text-sm mb-4" style={{ fontFamily: "monospace" }}>🪙 {savedCoins} coins</p>
             <div className="text-gray-500 text-xs text-center space-y-1" style={{ fontFamily: "monospace" }}>
               <p>Arrow Keys / WASD — Move · C / Space — Jump · X / Shift — Dash</p>
               <p>Tab — Shop · Q — Activate Slow-Mo · E — Place Checkpoint</p>
@@ -749,7 +902,7 @@ export default function Game() {
               <h2 className="text-xl font-bold text-cyan-400">🪙 SHOP</h2>
               <div className="flex items-center gap-4">
                 <span className="text-yellow-400 font-bold">🪙 {gs.coins}</span>
-                <button onClick={() => { setStatus("playing"); gs.status = "playing"; }} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded">✕ CLOSE</button>
+                <button onClick={() => { setStatus("playing"); gs.status = "playing"; startBGM(); }} className="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded">✕ CLOSE</button>
               </div>
             </div>
 
