@@ -936,33 +936,31 @@ export default function Game() {
 
             {/* Starter Pack Banner */}
             {!gs.starterPackBought && (
-              <div className="mb-3 rounded-lg overflow-hidden" style={{ background: "linear-gradient(135deg, #1a0533 0%, #2d1b69 40%, #4a1942 100%)", border: "1px solid rgba(196,77,255,0.4)" }}>
-                <div className="p-3">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-lg">⭐</span>
-                    <span className="text-yellow-300 font-bold text-sm">STARTER PACK</span>
-                    <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full ml-auto animate-pulse">BEST VALUE</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 text-xs text-gray-300 mb-0.5">
-                        <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: "#ff6b9d" }} />
-                        Aurora Hair (Exclusive)
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-gray-300 mb-0.5">
-                        <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: "#c44dff" }} />
-                        Aurora Trail (Exclusive)
-                      </div>
-                      <div className="text-xs text-yellow-400">+ 100 🪙 Coins</div>
-                      <div className="text-xs text-gray-500 mt-1 line-through">Value: 140 coins</div>
+              <div className="mb-4 rounded-lg" style={{ background: "linear-gradient(135deg, #1a0533 0%, #2d1b69 40%, #4a1942 100%)", border: "2px solid rgba(196,77,255,0.5)", padding: "16px" }}>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-xl">⭐</span>
+                  <span className="text-yellow-300 font-bold text-base">STARTER PACK</span>
+                  <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full ml-auto animate-pulse">BEST VALUE</span>
+                </div>
+                <div className="flex items-start gap-4">
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center gap-2 text-sm text-gray-200">
+                      <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ backgroundColor: "#ff6b9d" }} />
+                      Aurora Hair (Exclusive)
                     </div>
-                    <button
-                      onClick={buyStarterPack}
-                      className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-500 hover:to-pink-400 text-white font-bold text-sm rounded-lg shadow-lg shadow-purple-900/50 transition-all"
-                    >
-                      $0.99
-                    </button>
+                    <div className="flex items-center gap-2 text-sm text-gray-200">
+                      <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ backgroundColor: "#c44dff" }} />
+                      Aurora Trail (Exclusive)
+                    </div>
+                    <div className="text-sm text-yellow-400 mt-1">+ 100 🪙 Coins</div>
+                    <div className="text-xs text-gray-500 line-through">Value: 140 coins</div>
                   </div>
+                  <button
+                    onClick={buyStarterPack}
+                    className="px-5 py-3 bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-500 hover:to-pink-400 text-white font-bold text-base rounded-lg shadow-lg shadow-purple-900/50 transition-all flex-shrink-0"
+                  >
+                    $0.99
+                  </button>
                 </div>
               </div>
             )}
