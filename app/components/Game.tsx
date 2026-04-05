@@ -236,11 +236,30 @@ function createPlayer(spawn: { x: number; y: number }, hairColor: string = DEFAU
   };
 }
 
+// ─── Audio Settings ──────────────────────────────────────────────────────────
+let sfxMuted = false;
+let musicMuted = false;
+
+function loadAudioSettings() {
+  try {
+    sfxMuted = localStorage.getItem("summit_sfx_muted") === "true";
+    musicMuted = localStorage.getItem("summit_music_muted") === "true";
+  } catch { /* ignore */ }
+}
+function saveAudioSettings() {
+  try {
+    localStorage.setItem("summit_sfx_muted", String(sfxMuted));
+    localStorage.setItem("summit_music_muted", String(musicMuted));
+  } catch { /* ignore */ }
+}
+loadAudioSettings();
+
 // ─── Sound Effects ───────────────────────────────────────────────────────────
 let audioCtx: AudioContext | null = null;
 function getAudioCtx(): AudioContext { if (!audioCtx) audioCtx = new AudioContext(); return audioCtx; }
 
 function sfx(type: string) {
+  if (sfxMuted) return;
   try {
     const ctx = getAudioCtx();
     const osc = ctx.createOscillator();
@@ -293,7 +312,7 @@ let bgmTimeout: ReturnType<typeof setTimeout> | null = null;
 let bgmGainNode: GainNode | null = null;
 
 function startBGM() {
-  if (bgmPlaying) return;
+  if (bgmPlaying || musicMuted) return;
   bgmPlaying = true;
 
   const ctx = getAudioCtx();
@@ -540,8 +559,27 @@ export default function Game() {
   const [shopTab, setShopTab] = useState<"boosters" | "cosmetics">("boosters");
   const [, forceUpdate] = useState(0);
   const [savedCoins, setSavedCoins] = useState(0);
+  const [isSfxMuted, setIsSfxMuted] = useState(false);
+  const [isMusicMuted, setIsMusicMuted] = useState(false);
 
-  useEffect(() => { setSavedCoins(loadSave().coins); }, []);
+  useEffect(() => {
+    setSavedCoins(loadSave().coins);
+    setIsSfxMuted(sfxMuted);
+    setIsMusicMuted(musicMuted);
+  }, []);
+
+  const toggleSfx = useCallback(() => {
+    sfxMuted = !sfxMuted;
+    setIsSfxMuted(sfxMuted);
+    saveAudioSettings();
+  }, []);
+
+  const toggleMusic = useCallback(() => {
+    musicMuted = !musicMuted;
+    setIsMusicMuted(musicMuted);
+    saveAudioSettings();
+    if (musicMuted) stopBGM(); else if (status === "playing") startBGM();
+  }, [status]);
 
   const justPressed = useCallback((key: string) => keysRef.current.has(key) && !prevKeysRef.current.has(key), []);
 
@@ -897,6 +935,14 @@ export default function Game() {
               <p>Arrow Keys / WASD — Move · C / Space — Jump · X / Shift — Dash</p>
               <p>Tab — Shop · Q — Activate Slow-Mo · E — Place Checkpoint</p>
             </div>
+            <div className="flex gap-3 mt-4">
+              <button onClick={toggleSfx} className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${isSfxMuted ? "bg-red-900/50 text-red-400" : "bg-gray-800 text-gray-300"}`} style={{ fontFamily: "monospace" }}>
+                {isSfxMuted ? "🔇 SFX OFF" : "🔊 SFX ON"}
+              </button>
+              <button onClick={toggleMusic} className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${isMusicMuted ? "bg-red-900/50 text-red-400" : "bg-gray-800 text-gray-300"}`} style={{ fontFamily: "monospace" }}>
+                {isMusicMuted ? "🔇 MUSIC OFF" : "🎵 MUSIC ON"}
+              </button>
+            </div>
           </div>
         )}
 
@@ -1028,13 +1074,18 @@ export default function Game() {
         )}
       </div>
 
-      <div className="flex gap-6 text-gray-600 text-xs" style={{ fontFamily: "monospace" }}>
+      <div className="flex items-center gap-4 text-gray-600 text-xs" style={{ fontFamily: "monospace" }}>
         <span>Arrows/WASD: Move</span>
         <span>C/Space: Jump</span>
         <span>X/Shift: Dash</span>
         <span>Tab: Shop</span>
-        <span>Q: Slow-Mo</span>
-        <span>E: Checkpoint</span>
+        <span className="mx-1 text-gray-700">|</span>
+        <button onClick={toggleSfx} className="hover:text-gray-400 transition-colors">
+          {isSfxMuted ? "🔇" : "🔊"}
+        </button>
+        <button onClick={toggleMusic} className="hover:text-gray-400 transition-colors">
+          {isMusicMuted ? "🔇" : "🎵"}
+        </button>
       </div>
     </div>
   );
