@@ -93,6 +93,9 @@ const COSMETICS: CosmeticDef[] = [
   { id: "death_explode", type: "deathEffect", name: "Explosion", cost: 15, color: "#e74c3c" },
   { id: "death_dissolve", type: "deathEffect", name: "Dissolve", cost: 15, color: "#a29bfe" },
   { id: "death_shatter", type: "deathEffect", name: "Shatter", cost: 15, color: "#00cec9" },
+  // Starter pack exclusive
+  { id: "hair_aurora", type: "hair", name: "Aurora Hair ⭐", cost: 999, color: "#ff6b9d" },
+  { id: "trail_aurora", type: "trail", name: "Aurora Trail ⭐", cost: 999, color: "#c44dff" },
 ];
 
 const DEFAULT_HAIR = "#E84855";
@@ -123,6 +126,7 @@ interface GameState {
   checkpoint: { x: number; y: number } | null;
   slowMoFrames: number;
   springBoostActive: boolean;
+  starterPackBought: boolean;
 }
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
@@ -132,14 +136,15 @@ interface SaveData {
   eqHair: string;
   eqTrail: string;
   eqDeath: string;
+  starterPack: boolean;
 }
 
 function loadSave(): SaveData {
   try {
     const raw = localStorage.getItem("summit_save");
-    if (raw) return JSON.parse(raw);
+    if (raw) { const d = JSON.parse(raw); return { ...d, starterPack: d.starterPack || false }; }
   } catch { /* ignore */ }
-  return { coins: 0, owned: [], eqHair: "", eqTrail: "", eqDeath: "" };
+  return { coins: 0, owned: [], eqHair: "", eqTrail: "", eqDeath: "", starterPack: false };
 }
 
 function writeSave(gs: GameState) {
@@ -150,6 +155,7 @@ function writeSave(gs: GameState) {
       eqHair: gs.equippedHair,
       eqTrail: gs.equippedTrail,
       eqDeath: gs.equippedDeathEffect,
+      starterPack: gs.starterPackBought,
     };
     localStorage.setItem("summit_save", JSON.stringify(data));
   } catch { /* ignore */ }
@@ -600,6 +606,7 @@ export default function Game() {
       equippedHair: save.eqHair, equippedTrail: save.eqTrail, equippedDeathEffect: save.eqDeath,
       activeBooster: null, shieldActive: false, doubleDashActive: false,
       checkpoint: null, slowMoFrames: 0, springBoostActive: false,
+      starterPackBought: save.starterPack,
     };
     gsRef.current = gs;
     setStatus("playing");
@@ -632,6 +639,21 @@ export default function Game() {
       gs.ownedCosmetics.add(id);
       sfx("buy");
     }
+    writeSave(gs); forceUpdate(n => n + 1);
+  }, []);
+
+  const buyStarterPack = useCallback(() => {
+    const gs = gsRef.current; if (!gs || gs.starterPackBought) return;
+    // In production this would trigger Apple IAP — for now simulate the purchase
+    gs.starterPackBought = true;
+    gs.coins += 100;
+    gs.ownedCosmetics.add("hair_aurora");
+    gs.ownedCosmetics.add("trail_aurora");
+    gs.equippedHair = "hair_aurora";
+    gs.equippedTrail = "trail_aurora";
+    gs.player.hairColor = "#ff6b9d";
+    sfx("strawberry"); // celebratory chime
+    sfx("buy");
     writeSave(gs); forceUpdate(n => n + 1);
   }, []);
 
@@ -911,6 +933,39 @@ export default function Game() {
               <button onClick={() => setShopTab("boosters")} className={`px-4 py-2 rounded text-sm font-bold ${shopTab === "boosters" ? "bg-cyan-600 text-white" : "bg-gray-800 text-gray-400"}`}>BOOSTERS</button>
               <button onClick={() => setShopTab("cosmetics")} className={`px-4 py-2 rounded text-sm font-bold ${shopTab === "cosmetics" ? "bg-cyan-600 text-white" : "bg-gray-800 text-gray-400"}`}>COSMETICS</button>
             </div>
+
+            {/* Starter Pack Banner */}
+            {!gs.starterPackBought && (
+              <div className="mb-3 rounded-lg overflow-hidden" style={{ background: "linear-gradient(135deg, #1a0533 0%, #2d1b69 40%, #4a1942 100%)", border: "1px solid rgba(196,77,255,0.4)" }}>
+                <div className="p-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-lg">⭐</span>
+                    <span className="text-yellow-300 font-bold text-sm">STARTER PACK</span>
+                    <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full ml-auto animate-pulse">BEST VALUE</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 text-xs text-gray-300 mb-0.5">
+                        <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: "#ff6b9d" }} />
+                        Aurora Hair (Exclusive)
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-gray-300 mb-0.5">
+                        <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: "#c44dff" }} />
+                        Aurora Trail (Exclusive)
+                      </div>
+                      <div className="text-xs text-yellow-400">+ 100 🪙 Coins</div>
+                      <div className="text-xs text-gray-500 mt-1 line-through">Value: 140 coins</div>
+                    </div>
+                    <button
+                      onClick={buyStarterPack}
+                      className="px-4 py-2 bg-gradient-to-r from-purple-600 to-pink-500 hover:from-purple-500 hover:to-pink-400 text-white font-bold text-sm rounded-lg shadow-lg shadow-purple-900/50 transition-all"
+                    >
+                      $0.99
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {shopTab === "boosters" && (
               <div className="grid grid-cols-2 gap-2">
