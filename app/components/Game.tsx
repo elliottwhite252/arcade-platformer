@@ -317,116 +317,104 @@ const MELODIES = [
 let bgmPlaying = false;
 let bgmTimeout: ReturnType<typeof setTimeout> | null = null;
 let bgmGainNode: GainNode | null = null;
+let bgmScheduledEnd = 0; // track when current loop ends to avoid overlap
 
 function startBGM() {
   if (bgmPlaying || musicMuted) return;
   bgmPlaying = true;
 
   const ctx = getAudioCtx();
+  // Create a fresh gain node each time
+  if (bgmGainNode) { try { bgmGainNode.disconnect(); } catch { /* */ } }
   bgmGainNode = ctx.createGain();
-  bgmGainNode.gain.value = 0.08;
+  bgmGainNode.gain.value = 0.07;
   bgmGainNode.connect(ctx.destination);
 
   const BPM = 120;
-  const beatDur = 60 / BPM; // 0.5s per beat
-  const barDur = beatDur * 4; // 2s per bar
-  const loopDur = barDur * 4; // 8s per loop (4 chords)
+  const beatDur = 60 / BPM;
+  const barDur = beatDur * 4;
+  const loopDur = barDur * 4;
 
   function scheduleLoop() {
     if (!bgmPlaying || !bgmGainNode) return;
     const ctx = getAudioCtx();
-    const now = ctx.currentTime + 0.05;
+    // Start after any previously scheduled notes finish
+    const now = Math.max(ctx.currentTime + 0.05, bgmScheduledEnd);
+    bgmScheduledEnd = now + loopDur;
 
     for (let ci = 0; ci < 4; ci++) {
       const chord = CHORD_PROG[ci];
       const barStart = now + ci * barDur;
 
-      // Bass (triangle wave, root note, whole bar)
+      // Bass (triangle wave)
       const bass = ctx.createOscillator();
       const bassGain = ctx.createGain();
       bass.type = "triangle";
       bass.frequency.value = chord.root;
-      bassGain.gain.setValueAtTime(0.12, barStart);
-      bassGain.gain.setValueAtTime(0.12, barStart + barDur - 0.05);
-      bassGain.gain.linearRampToValueAtTime(0, barStart + barDur);
-      bass.connect(bassGain);
-      bassGain.connect(bgmGainNode!);
-      bass.start(barStart);
-      bass.stop(barStart + barDur);
+      bassGain.gain.setValueAtTime(0.1, barStart);
+      bassGain.gain.linearRampToValueAtTime(0, barStart + barDur - 0.01);
+      bass.connect(bassGain); bassGain.connect(bgmGainNode!);
+      bass.start(barStart); bass.stop(barStart + barDur);
 
-      // Chord arpeggio (square wave, 8th notes)
+      // Arpeggio (square wave, 8th notes)
       for (let n = 0; n < 8; n++) {
-        const noteStart = barStart + n * (beatDur / 2);
-        const noteFreq = chord.notes[n % chord.notes.length];
+        const ns = barStart + n * (beatDur / 2);
         const arp = ctx.createOscillator();
-        const arpGain = ctx.createGain();
+        const ag = ctx.createGain();
         arp.type = "square";
-        arp.frequency.value = noteFreq;
-        arpGain.gain.setValueAtTime(0.04, noteStart);
-        arpGain.gain.linearRampToValueAtTime(0, noteStart + beatDur / 2 - 0.02);
-        arp.connect(arpGain);
-        arpGain.connect(bgmGainNode!);
-        arp.start(noteStart);
-        arp.stop(noteStart + beatDur / 2);
+        arp.frequency.value = chord.notes[n % chord.notes.length];
+        ag.gain.setValueAtTime(0.03, ns);
+        ag.gain.linearRampToValueAtTime(0, ns + beatDur / 2 - 0.02);
+        arp.connect(ag); ag.connect(bgmGainNode!);
+        arp.start(ns); arp.stop(ns + beatDur / 2);
       }
 
-      // Melody (pulse/square, 8th notes)
+      // Melody
       const melody = MELODIES[ci];
       for (let n = 0; n < melody.length; n++) {
-        const noteStart = barStart + n * (beatDur / 2);
+        const ns = barStart + n * (beatDur / 2);
         const mel = ctx.createOscillator();
-        const melGain = ctx.createGain();
+        const mg = ctx.createGain();
         mel.type = "square";
         mel.frequency.value = melody[n];
-        melGain.gain.setValueAtTime(0.06, noteStart);
-        melGain.gain.setValueAtTime(0.06, noteStart + beatDur / 2 - 0.06);
-        melGain.gain.linearRampToValueAtTime(0, noteStart + beatDur / 2 - 0.01);
-        mel.connect(melGain);
-        melGain.connect(bgmGainNode!);
-        mel.start(noteStart);
-        mel.stop(noteStart + beatDur / 2);
+        mg.gain.setValueAtTime(0.05, ns);
+        mg.gain.linearRampToValueAtTime(0, ns + beatDur / 2 - 0.02);
+        mel.connect(mg); mg.connect(bgmGainNode!);
+        mel.start(ns); mel.stop(ns + beatDur / 2);
       }
 
-      // Kick drum on beats 1 and 3 (noise + low osc)
+      // Kick on beats 1 and 3
       for (let beat = 0; beat < 4; beat += 2) {
-        const kickTime = barStart + beat * beatDur;
-        const kickOsc = ctx.createOscillator();
-        const kickGain = ctx.createGain();
-        kickOsc.type = "sine";
-        kickOsc.frequency.setValueAtTime(150, kickTime);
-        kickOsc.frequency.exponentialRampToValueAtTime(40, kickTime + 0.08);
-        kickGain.gain.setValueAtTime(0.15, kickTime);
-        kickGain.gain.linearRampToValueAtTime(0, kickTime + 0.1);
-        kickOsc.connect(kickGain);
-        kickGain.connect(bgmGainNode!);
-        kickOsc.start(kickTime);
-        kickOsc.stop(kickTime + 0.1);
+        const kt = barStart + beat * beatDur;
+        const ko = ctx.createOscillator();
+        const kg = ctx.createGain();
+        ko.type = "sine";
+        ko.frequency.setValueAtTime(150, kt);
+        ko.frequency.exponentialRampToValueAtTime(40, kt + 0.08);
+        kg.gain.setValueAtTime(0.12, kt);
+        kg.gain.linearRampToValueAtTime(0, kt + 0.1);
+        ko.connect(kg); kg.connect(bgmGainNode!);
+        ko.start(kt); ko.stop(kt + 0.1);
       }
 
-      // Hi-hat on every 8th note (noise)
+      // Hi-hat on 8th notes
       for (let n = 0; n < 8; n++) {
-        const hatTime = barStart + n * (beatDur / 2);
-        const hatBuf = ctx.createBuffer(1, ctx.sampleRate * 0.03, ctx.sampleRate);
-        const hatData = hatBuf.getChannelData(0);
-        for (let i = 0; i < hatData.length; i++) hatData[i] = (Math.random() * 2 - 1) * (1 - i / hatData.length);
-        const hat = ctx.createBufferSource();
-        hat.buffer = hatBuf;
-        const hatGain = ctx.createGain();
-        const hatFilter = ctx.createBiquadFilter();
-        hatFilter.type = "highpass";
-        hatFilter.frequency.value = 8000;
-        hatGain.gain.setValueAtTime(n % 2 === 0 ? 0.04 : 0.02, hatTime);
-        hatGain.gain.linearRampToValueAtTime(0, hatTime + 0.03);
-        hat.connect(hatFilter);
-        hatFilter.connect(hatGain);
-        hatGain.connect(bgmGainNode!);
-        hat.start(hatTime);
-        hat.stop(hatTime + 0.03);
+        const ht = barStart + n * (beatDur / 2);
+        const hb = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.02), ctx.sampleRate);
+        const hd = hb.getChannelData(0);
+        for (let i = 0; i < hd.length; i++) hd[i] = (Math.random() * 2 - 1) * (1 - i / hd.length);
+        const hs = ctx.createBufferSource(); hs.buffer = hb;
+        const hg = ctx.createGain();
+        const hf = ctx.createBiquadFilter(); hf.type = "highpass"; hf.frequency.value = 8000;
+        hg.gain.setValueAtTime(n % 2 === 0 ? 0.03 : 0.015, ht);
+        hg.gain.linearRampToValueAtTime(0, ht + 0.02);
+        hs.connect(hf); hf.connect(hg); hg.connect(bgmGainNode!);
+        hs.start(ht); hs.stop(ht + 0.02);
       }
     }
 
-    // Schedule next loop
-    bgmTimeout = setTimeout(scheduleLoop, loopDur * 1000 - 100);
+    // Schedule next loop — wait until this one finishes (no overlap)
+    bgmTimeout = setTimeout(scheduleLoop, (bgmScheduledEnd - ctx.currentTime) * 1000 - 50);
   }
 
   scheduleLoop();
@@ -436,9 +424,15 @@ function stopBGM() {
   bgmPlaying = false;
   if (bgmTimeout) { clearTimeout(bgmTimeout); bgmTimeout = null; }
   if (bgmGainNode) {
-    try { bgmGainNode.gain.linearRampToValueAtTime(0, getAudioCtx().currentTime + 0.5); } catch { /* ignore */ }
-    bgmGainNode = null;
+    try {
+      const ctx = getAudioCtx();
+      bgmGainNode.gain.cancelScheduledValues(ctx.currentTime);
+      bgmGainNode.gain.setValueAtTime(bgmGainNode.gain.value, ctx.currentTime);
+      bgmGainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.3);
+      setTimeout(() => { if (bgmGainNode) { try { bgmGainNode.disconnect(); } catch { /* */ } bgmGainNode = null; } }, 400);
+    } catch { bgmGainNode = null; }
   }
+  bgmScheduledEnd = 0;
 }
 
 // ─── Drawing ─────────────────────────────────────────────────────────────────
