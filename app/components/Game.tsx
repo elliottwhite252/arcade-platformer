@@ -305,18 +305,28 @@ function initSfxBuffers() {
   } catch { /* ignore */ }
 }
 
+const sfxCooldowns: Record<string, number> = {};
+
 function sfx(type: string) {
   if (sfxMuted) return;
   try {
+    // Cooldown: same sound can't play within 50ms
+    const now = performance.now();
+    if (sfxCooldowns[type] && now - sfxCooldowns[type] < 50) return;
+    sfxCooldowns[type] = now;
+
     const ctx = getAudioCtx();
     if (!sfxBuffers[type]) initSfxBuffers();
     const buf = sfxBuffers[type];
     if (!buf) return;
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    src.connect(ctx.destination);
+    const gain = ctx.createGain();
+    gain.gain.value = 0.5;
+    src.connect(gain);
+    gain.connect(ctx.destination);
+    src.onended = () => { try { src.disconnect(); gain.disconnect(); } catch { /* */ } };
     src.start();
-    // Auto-disconnects when done — no cleanup needed
   } catch { /* ignore */ }
 }
 
