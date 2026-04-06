@@ -310,9 +310,9 @@ const sfxCooldowns: Record<string, number> = {};
 function sfx(type: string) {
   if (sfxMuted) return;
   try {
-    // Cooldown: same sound can't play within 50ms
+    // Cooldown: same sound can't play within 200ms
     const now = performance.now();
-    if (sfxCooldowns[type] && now - sfxCooldowns[type] < 50) return;
+    if (sfxCooldowns[type] && now - sfxCooldowns[type] < 200) return;
     sfxCooldowns[type] = now;
 
     const ctx = getAudioCtx();
@@ -840,7 +840,7 @@ export default function Game() {
         if (p.vy > 0) {
           p.y = plat.y - PH; p.grounded = true; p.canDash = true; p.dashCount = 0;
           p.hairColor = getHairColor(gs);
-          if (p.vy > 4) { spawnParticles(gs, p.x + PW / 2, p.y + PH, "rgba(255,255,255,0.4)", 3); sfx("land"); }
+          if (p.vy > 6) { spawnParticles(gs, p.x + PW / 2, p.y + PH, "rgba(255,255,255,0.4)", 3); sfx("land"); }
         } else if (p.vy < 0) {
           // Jump corner correction — nudge player sideways if hitting a corner
           let corrected = false;
