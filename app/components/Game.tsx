@@ -316,19 +316,26 @@ const MELODIES = [
 
 let bgmPlaying = false;
 let bgmTimeout: ReturnType<typeof setTimeout> | null = null;
-let bgmGainNode: GainNode | null = null;
-let bgmScheduledEnd = 0; // track when current loop ends to avoid overlap
+
+// Use a completely separate AudioContext for BGM so we can nuke it on stop
+let bgmCtx: AudioContext | null = null;
 
 function startBGM() {
   if (bgmPlaying || musicMuted) return;
-  bgmPlaying = true;
+  stopBGM(); // kill any leftover audio
 
-  const ctx = getAudioCtx();
-  // Create a fresh gain node each time
-  if (bgmGainNode) { try { bgmGainNode.disconnect(); } catch { /* */ } }
-  bgmGainNode = ctx.createGain();
-  bgmGainNode.gain.value = 0.07;
-  bgmGainNode.connect(ctx.destination);
+  bgmPlaying = true;
+  bgmCtx = new AudioContext();
+  const master = bgmCtx.createGain();
+  master.gain.value = 0.06;
+  // Add a compressor/limiter to prevent clipping
+  const compressor = bgmCtx.createDynamicsCompressor();
+  compressor.threshold.value = -10;
+  compressor.ratio.value = 12;
+  compressor.attack.value = 0.003;
+  compressor.release.value = 0.1;
+  master.connect(compressor);
+  compressor.connect(bgmCtx.destination);
 
   const BPM = 120;
   const beatDur = 60 / BPM;
@@ -336,36 +343,33 @@ function startBGM() {
   const loopDur = barDur * 4;
 
   function scheduleLoop() {
-    if (!bgmPlaying || !bgmGainNode) return;
-    const ctx = getAudioCtx();
-    // Start after any previously scheduled notes finish
-    const now = Math.max(ctx.currentTime + 0.05, bgmScheduledEnd);
-    bgmScheduledEnd = now + loopDur;
+    if (!bgmPlaying || !bgmCtx) return;
+    const now = bgmCtx.currentTime + 0.05;
 
     for (let ci = 0; ci < 4; ci++) {
       const chord = CHORD_PROG[ci];
       const barStart = now + ci * barDur;
 
       // Bass (triangle wave)
-      const bass = ctx.createOscillator();
-      const bassGain = ctx.createGain();
+      const bass = bgmCtx.createOscillator();
+      const bg = bgmCtx.createGain();
       bass.type = "triangle";
       bass.frequency.value = chord.root;
-      bassGain.gain.setValueAtTime(0.1, barStart);
-      bassGain.gain.linearRampToValueAtTime(0, barStart + barDur - 0.01);
-      bass.connect(bassGain); bassGain.connect(bgmGainNode!);
+      bg.gain.setValueAtTime(0.1, barStart);
+      bg.gain.linearRampToValueAtTime(0, barStart + barDur - 0.01);
+      bass.connect(bg); bg.connect(master);
       bass.start(barStart); bass.stop(barStart + barDur);
 
-      // Arpeggio (square wave, 8th notes)
+      // Arpeggio
       for (let n = 0; n < 8; n++) {
         const ns = barStart + n * (beatDur / 2);
-        const arp = ctx.createOscillator();
-        const ag = ctx.createGain();
+        const arp = bgmCtx.createOscillator();
+        const ag = bgmCtx.createGain();
         arp.type = "square";
         arp.frequency.value = chord.notes[n % chord.notes.length];
-        ag.gain.setValueAtTime(0.03, ns);
-        ag.gain.linearRampToValueAtTime(0, ns + beatDur / 2 - 0.02);
-        arp.connect(ag); ag.connect(bgmGainNode!);
+        ag.gain.setValueAtTime(0.025, ns);
+        ag.gain.linearRampToValueAtTime(0, ns + beatDur / 2 - 0.03);
+        arp.connect(ag); ag.connect(master);
         arp.start(ns); arp.stop(ns + beatDur / 2);
       }
 
@@ -373,48 +377,32 @@ function startBGM() {
       const melody = MELODIES[ci];
       for (let n = 0; n < melody.length; n++) {
         const ns = barStart + n * (beatDur / 2);
-        const mel = ctx.createOscillator();
-        const mg = ctx.createGain();
+        const mel = bgmCtx.createOscillator();
+        const mg = bgmCtx.createGain();
         mel.type = "square";
         mel.frequency.value = melody[n];
-        mg.gain.setValueAtTime(0.05, ns);
-        mg.gain.linearRampToValueAtTime(0, ns + beatDur / 2 - 0.02);
-        mel.connect(mg); mg.connect(bgmGainNode!);
+        mg.gain.setValueAtTime(0.04, ns);
+        mg.gain.linearRampToValueAtTime(0, ns + beatDur / 2 - 0.03);
+        mel.connect(mg); mg.connect(master);
         mel.start(ns); mel.stop(ns + beatDur / 2);
       }
 
-      // Kick on beats 1 and 3
+      // Kick
       for (let beat = 0; beat < 4; beat += 2) {
         const kt = barStart + beat * beatDur;
-        const ko = ctx.createOscillator();
-        const kg = ctx.createGain();
+        const ko = bgmCtx.createOscillator();
+        const kg = bgmCtx.createGain();
         ko.type = "sine";
         ko.frequency.setValueAtTime(150, kt);
         ko.frequency.exponentialRampToValueAtTime(40, kt + 0.08);
-        kg.gain.setValueAtTime(0.12, kt);
-        kg.gain.linearRampToValueAtTime(0, kt + 0.1);
-        ko.connect(kg); kg.connect(bgmGainNode!);
+        kg.gain.setValueAtTime(0.1, kt);
+        kg.gain.linearRampToValueAtTime(0, kt + 0.08);
+        ko.connect(kg); kg.connect(master);
         ko.start(kt); ko.stop(kt + 0.1);
-      }
-
-      // Hi-hat on 8th notes
-      for (let n = 0; n < 8; n++) {
-        const ht = barStart + n * (beatDur / 2);
-        const hb = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.02), ctx.sampleRate);
-        const hd = hb.getChannelData(0);
-        for (let i = 0; i < hd.length; i++) hd[i] = (Math.random() * 2 - 1) * (1 - i / hd.length);
-        const hs = ctx.createBufferSource(); hs.buffer = hb;
-        const hg = ctx.createGain();
-        const hf = ctx.createBiquadFilter(); hf.type = "highpass"; hf.frequency.value = 8000;
-        hg.gain.setValueAtTime(n % 2 === 0 ? 0.03 : 0.015, ht);
-        hg.gain.linearRampToValueAtTime(0, ht + 0.02);
-        hs.connect(hf); hf.connect(hg); hg.connect(bgmGainNode!);
-        hs.start(ht); hs.stop(ht + 0.02);
       }
     }
 
-    // Schedule next loop — wait until this one finishes (no overlap)
-    bgmTimeout = setTimeout(scheduleLoop, (bgmScheduledEnd - ctx.currentTime) * 1000 - 50);
+    bgmTimeout = setTimeout(scheduleLoop, loopDur * 1000 - 200);
   }
 
   scheduleLoop();
@@ -423,16 +411,10 @@ function startBGM() {
 function stopBGM() {
   bgmPlaying = false;
   if (bgmTimeout) { clearTimeout(bgmTimeout); bgmTimeout = null; }
-  if (bgmGainNode) {
-    try {
-      const ctx = getAudioCtx();
-      bgmGainNode.gain.cancelScheduledValues(ctx.currentTime);
-      bgmGainNode.gain.setValueAtTime(bgmGainNode.gain.value, ctx.currentTime);
-      bgmGainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.3);
-      setTimeout(() => { if (bgmGainNode) { try { bgmGainNode.disconnect(); } catch { /* */ } bgmGainNode = null; } }, 400);
-    } catch { bgmGainNode = null; }
+  if (bgmCtx) {
+    try { bgmCtx.close(); } catch { /* */ }
+    bgmCtx = null;
   }
-  bgmScheduledEnd = 0;
 }
 
 // ─── Drawing ─────────────────────────────────────────────────────────────────
