@@ -261,34 +261,62 @@ function saveAudioSettings() {
 }
 loadAudioSettings();
 
-// ─── Sound Effects ───────────────────────────────────────────────────────────
+// ─── Sound Effects (pre-rendered buffers) ────────────────────────────────────
 let audioCtx: AudioContext | null = null;
 function getAudioCtx(): AudioContext { if (!audioCtx) audioCtx = new AudioContext(); return audioCtx; }
+
+const sfxBuffers: Record<string, AudioBuffer> = {};
+
+function genSfxSamples(type: string, sr: number): Float32Array {
+  const sq = (t: number, f: number) => Math.sin(2 * Math.PI * f * t) > 0 ? 1 : -1;
+  const sn = (t: number, f: number) => Math.sin(2 * Math.PI * f * t);
+  const tri = (t: number, f: number) => { const p = (t * f) % 1; return 4 * Math.abs(p - 0.5) - 1; };
+  const lerp = (a: number, b: number, p: number) => a + (b - a) * p;
+  const noise = () => Math.random() * 2 - 1;
+
+  switch (type) {
+    case "jump": { const d = 0.1, s = new Float32Array(Math.floor(sr * d)); for (let i = 0; i < s.length; i++) { const t = i / sr; s[i] = sq(t, lerp(280, 560, t / d)) * (1 - t / d) * 0.3; } return s; }
+    case "walljump": { const d = 0.12, s = new Float32Array(Math.floor(sr * d)); for (let i = 0; i < s.length; i++) { const t = i / sr, p = t / d; const f = p < 0.5 ? lerp(200, 600, p * 2) : lerp(600, 400, (p - 0.5) * 2); s[i] = sq(t, f) * (1 - p) * 0.3; } return s; }
+    case "dash": { const d = 0.15, s = new Float32Array(Math.floor(sr * d)); for (let i = 0; i < s.length; i++) { const t = i / sr, e = 1 - t / d; s[i] = (noise() * 0.2 + sn(t, lerp(150, 80, t / d)) * 0.15) * e; } return s; }
+    case "death": { const d = 0.25, s = new Float32Array(Math.floor(sr * d)); for (let i = 0; i < s.length; i++) { const t = i / sr, e = 1 - t / d; s[i] = (sq(t, lerp(400, 80, t / d)) * 0.2 + noise() * 0.1) * e; } return s; }
+    case "strawberry": { const d = 0.35, s = new Float32Array(Math.floor(sr * d)); const n = [523, 659, 784, 1047]; for (let i = 0; i < s.length; i++) { const t = i / sr; const ni = Math.min(Math.floor(t / d * n.length), n.length - 1); s[i] = sn(t, n[ni]) * (1 - t / d) * 0.25; } return s; }
+    case "spring": { const d = 0.18, s = new Float32Array(Math.floor(sr * d)); for (let i = 0; i < s.length; i++) { const t = i / sr, p = t / d; const f = p < 0.6 ? lerp(200, 800, p / 0.6) : lerp(800, 400, (p - 0.6) / 0.4); s[i] = sn(t, f) * (1 - p) * 0.3; } return s; }
+    case "land": { const d = 0.06, s = new Float32Array(Math.floor(sr * d)); for (let i = 0; i < s.length; i++) { const t = i / sr; s[i] = tri(t, lerp(120, 60, t / d)) * (1 - t / d) * 0.2; } return s; }
+    case "crumble": { const d = 0.15, s = new Float32Array(Math.floor(sr * d)); for (let i = 0; i < s.length; i++) { const t = i / sr; s[i] = noise() * (1 - t / d) * 0.2; } return s; }
+    case "roomenter": { const d = 0.3, s = new Float32Array(Math.floor(sr * d)); const n = [440, 554, 659]; for (let i = 0; i < s.length; i++) { const t = i / sr; const ni = Math.min(Math.floor(t / d * n.length), n.length - 1); s[i] = sn(t, n[ni]) * (1 - t / d) * 0.2; } return s; }
+    case "win": { const d = 0.9, s = new Float32Array(Math.floor(sr * d)); const n = [523, 659, 784, 1047, 784, 1047]; for (let i = 0; i < s.length; i++) { const t = i / sr; const ni = Math.min(Math.floor(t / (d / n.length)), n.length - 1); s[i] = (sq(t, n[ni]) * 0.1 + sn(t, n[ni] * 0.5) * 0.08) * Math.max(0, 1 - t / d); } return s; }
+    case "coin": { const d = 0.08, s = new Float32Array(Math.floor(sr * d)); for (let i = 0; i < s.length; i++) { const t = i / sr; const f = t < d / 2 ? 800 : 1200; s[i] = sn(t, f) * (1 - t / d) * 0.2; } return s; }
+    case "buy": { const d = 0.12, s = new Float32Array(Math.floor(sr * d)); const n = [600, 800, 1000]; for (let i = 0; i < s.length; i++) { const t = i / sr; const ni = Math.min(Math.floor(t / d * n.length), n.length - 1); s[i] = sn(t, n[ni]) * (1 - t / d) * 0.2; } return s; }
+    case "shield": { const d = 0.18, s = new Float32Array(Math.floor(sr * d)); for (let i = 0; i < s.length; i++) { const t = i / sr; s[i] = sn(t, lerp(500, 300, t / d)) * (1 - t / d) * 0.25; } return s; }
+    default: return new Float32Array(100);
+  }
+}
+
+function initSfxBuffers() {
+  try {
+    const ctx = getAudioCtx();
+    const types = ["jump", "walljump", "dash", "death", "strawberry", "spring", "land", "crumble", "roomenter", "win", "coin", "buy", "shield"];
+    for (const type of types) {
+      const samples = genSfxSamples(type, ctx.sampleRate);
+      const buf = ctx.createBuffer(1, samples.length, ctx.sampleRate);
+      buf.getChannelData(0).set(samples);
+      sfxBuffers[type] = buf;
+    }
+  } catch { /* ignore */ }
+}
 
 function sfx(type: string) {
   if (sfxMuted) return;
   try {
     const ctx = getAudioCtx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain); gain.connect(ctx.destination);
-    const t = ctx.currentTime;
-    switch (type) {
-      case "jump": osc.type = "square"; osc.frequency.setValueAtTime(280, t); osc.frequency.linearRampToValueAtTime(560, t + 0.08); gain.gain.setValueAtTime(0.12, t); gain.gain.linearRampToValueAtTime(0, t + 0.1); osc.start(t); osc.stop(t + 0.1); break;
-      case "walljump": osc.type = "square"; osc.frequency.setValueAtTime(200, t); osc.frequency.linearRampToValueAtTime(600, t + 0.06); osc.frequency.linearRampToValueAtTime(400, t + 0.12); gain.gain.setValueAtTime(0.12, t); gain.gain.linearRampToValueAtTime(0, t + 0.12); osc.start(t); osc.stop(t + 0.12); break;
-      case "dash": { const buf = ctx.createBuffer(1, ctx.sampleRate * 0.15, ctx.sampleRate); const data = buf.getChannelData(0); for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length); const noise = ctx.createBufferSource(); noise.buffer = buf; const ng = ctx.createGain(); ng.gain.setValueAtTime(0.15, t); ng.gain.linearRampToValueAtTime(0, t + 0.15); const filt = ctx.createBiquadFilter(); filt.type = "bandpass"; filt.frequency.setValueAtTime(2000, t); filt.frequency.linearRampToValueAtTime(500, t + 0.15); filt.Q.value = 2; noise.connect(filt); filt.connect(ng); ng.connect(ctx.destination); noise.start(t); noise.stop(t + 0.15); osc.type = "sawtooth"; osc.frequency.setValueAtTime(150, t); osc.frequency.linearRampToValueAtTime(80, t + 0.1); gain.gain.setValueAtTime(0.08, t); gain.gain.linearRampToValueAtTime(0, t + 0.1); osc.start(t); osc.stop(t + 0.1); break; }
-      case "death": { osc.type = "square"; osc.frequency.setValueAtTime(400, t); osc.frequency.linearRampToValueAtTime(80, t + 0.3); gain.gain.setValueAtTime(0.15, t); gain.gain.linearRampToValueAtTime(0, t + 0.3); osc.start(t); osc.stop(t + 0.3); const buf = ctx.createBuffer(1, ctx.sampleRate * 0.12, ctx.sampleRate); const data = buf.getChannelData(0); for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length); const noise = ctx.createBufferSource(); noise.buffer = buf; const ng = ctx.createGain(); ng.gain.setValueAtTime(0.2, t); ng.gain.linearRampToValueAtTime(0, t + 0.12); noise.connect(ng); ng.connect(ctx.destination); noise.start(t); noise.stop(t + 0.12); break; }
-      case "strawberry": { osc.type = "sine"; osc.frequency.setValueAtTime(523, t); osc.frequency.setValueAtTime(659, t + 0.08); osc.frequency.setValueAtTime(784, t + 0.16); osc.frequency.setValueAtTime(1047, t + 0.24); gain.gain.setValueAtTime(0.12, t); gain.gain.setValueAtTime(0.12, t + 0.28); gain.gain.linearRampToValueAtTime(0, t + 0.4); osc.start(t); osc.stop(t + 0.4); break; }
-      case "spring": osc.type = "sine"; osc.frequency.setValueAtTime(200, t); osc.frequency.exponentialRampToValueAtTime(800, t + 0.12); osc.frequency.exponentialRampToValueAtTime(400, t + 0.2); gain.gain.setValueAtTime(0.15, t); gain.gain.linearRampToValueAtTime(0, t + 0.2); osc.start(t); osc.stop(t + 0.2); break;
-      case "land": osc.type = "triangle"; osc.frequency.setValueAtTime(120, t); osc.frequency.linearRampToValueAtTime(60, t + 0.06); gain.gain.setValueAtTime(0.08, t); gain.gain.linearRampToValueAtTime(0, t + 0.06); osc.start(t); osc.stop(t + 0.06); break;
-      case "crumble": { const buf = ctx.createBuffer(1, ctx.sampleRate * 0.2, ctx.sampleRate); const data = buf.getChannelData(0); for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length) * 0.5; const noise = ctx.createBufferSource(); noise.buffer = buf; const ng = ctx.createGain(); ng.gain.setValueAtTime(0.15, t); ng.gain.linearRampToValueAtTime(0, t + 0.2); const f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 800; noise.connect(f); f.connect(ng); ng.connect(ctx.destination); noise.start(t); noise.stop(t + 0.2); gain.gain.setValueAtTime(0, t); osc.start(t); osc.stop(t + 0.01); break; }
-      case "roomenter": osc.type = "sine"; osc.frequency.setValueAtTime(440, t); osc.frequency.setValueAtTime(554, t + 0.1); osc.frequency.setValueAtTime(659, t + 0.2); gain.gain.setValueAtTime(0.08, t); gain.gain.linearRampToValueAtTime(0, t + 0.35); osc.start(t); osc.stop(t + 0.35); break;
-      case "win": { const notes = [523, 659, 784, 1047, 784, 1047]; osc.type = "square"; for (let i = 0; i < notes.length; i++) osc.frequency.setValueAtTime(notes[i], t + i * 0.15); gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0, t + notes.length * 0.15 + 0.3); osc.start(t); osc.stop(t + notes.length * 0.15 + 0.3); break; }
-      case "coin": osc.type = "sine"; osc.frequency.setValueAtTime(800, t); osc.frequency.setValueAtTime(1200, t + 0.05); gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0, t + 0.1); osc.start(t); osc.stop(t + 0.1); break;
-      case "buy": osc.type = "sine"; osc.frequency.setValueAtTime(600, t); osc.frequency.setValueAtTime(800, t + 0.05); osc.frequency.setValueAtTime(1000, t + 0.1); gain.gain.setValueAtTime(0.1, t); gain.gain.linearRampToValueAtTime(0, t + 0.15); osc.start(t); osc.stop(t + 0.15); break;
-      case "shield": osc.type = "sine"; osc.frequency.setValueAtTime(500, t); osc.frequency.setValueAtTime(300, t + 0.15); gain.gain.setValueAtTime(0.12, t); gain.gain.linearRampToValueAtTime(0, t + 0.2); osc.start(t); osc.stop(t + 0.2); break;
-      default: gain.gain.setValueAtTime(0, t); osc.start(t); osc.stop(t + 0.01);
-    }
+    if (!sfxBuffers[type]) initSfxBuffers();
+    const buf = sfxBuffers[type];
+    if (!buf) return;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ctx.destination);
+    src.start();
+    // Auto-disconnects when done — no cleanup needed
   } catch { /* ignore */ }
 }
 
