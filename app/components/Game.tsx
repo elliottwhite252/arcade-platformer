@@ -25,6 +25,9 @@ const SPRING_FORCE = -13;
 const PW = 12;
 const PH = 16;
 const HAIR_COUNT = 5;
+const HALF_GRAV_THRESHOLD = -2; // apply half gravity when vy is above this (near jump peak)
+const CORNER_CORRECTION = 4; // pixels to nudge for corner correction
+const WALL_JUMP_FORGIVENESS = 4; // pixels of wall-jump detection range (wider = more forgiving)
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Rect { x: number; y: number; w: number; h: number }
@@ -128,7 +131,9 @@ interface GameState {
   springBoostActive: boolean;
   starterPackBought: boolean;
   roomDeaths: number;
-  offerBooster: BoosterType | null; // which booster to offer
+  offerBooster: BoosterType | null;
+  transitionTimer: number; // >0 = room transition animation playing
+  transitionDir: number; // 1 = fading out, -1 = fading in
 }
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
@@ -658,6 +663,7 @@ export default function Game() {
       checkpoint: null, slowMoFrames: 0, springBoostActive: false,
       starterPackBought: save.starterPack,
       roomDeaths: 0, offerBooster: null,
+      transitionTimer: 0, transitionDir: 0,
     };
     gsRef.current = gs;
     setStatus("playing");
@@ -803,17 +809,40 @@ export default function Game() {
       if (gs.time % 2 === 0) gs.particles.push({ x: p.x + PW / 2, y: p.y + PH / 2, vx: 0, vy: 0, life: 0.6, color: p.hairColor, size: 4 });
     } else { p.dashCooldown = Math.max(0, p.dashCooldown - 1); }
 
-    // Gravity
+    // Gravity (with half-gravity at jump peak for hangtime)
     if (p.dashing <= 0) {
-      if (p.wallDir !== 0 && p.vy > 0) p.vy = Math.min(p.vy + GRAVITY * 0.4 * slowMo, WALL_SLIDE_SPEED);
-      else p.vy = Math.min(p.vy + GRAVITY * slowMo, MAX_FALL);
+      if (p.wallDir !== 0 && p.vy > 0) {
+        p.vy = Math.min(p.vy + GRAVITY * 0.4 * slowMo, WALL_SLIDE_SPEED);
+      } else if (p.jumpHeld && Math.abs(p.vy) < Math.abs(HALF_GRAV_THRESHOLD)) {
+        // Half gravity near jump peak when holding jump — gives hangtime
+        p.vy = Math.min(p.vy + GRAVITY * 0.5 * slowMo, MAX_FALL);
+      } else {
+        p.vy = Math.min(p.vy + GRAVITY * slowMo, MAX_FALL);
+      }
     }
 
     // Collisions
     p.x += p.vx;
     const allSolids = [...room.platforms];
     for (const c of room.crumbles) { if (c.visible) allSolids.push({ x: c.x, y: c.y, w: c.w, h: TILE }); }
-    for (const plat of allSolids) { if (rectsOverlap({ x: p.x, y: p.y, w: PW, h: PH }, plat)) { if (p.vx > 0) p.x = plat.x - PW; else if (p.vx < 0) p.x = plat.x + plat.w; p.vx = 0; } }
+    for (const plat of allSolids) {
+      if (rectsOverlap({ x: p.x, y: p.y, w: PW, h: PH }, plat)) {
+        // Dash corner correction — if dashing sideways into a ledge, pop up onto it
+        if (p.dashing > 0 && Math.abs(p.dashDir.y) < 0.1) {
+          let popped = false;
+          for (let nudge = 1; nudge <= CORNER_CORRECTION + 2; nudge++) {
+            if (!rectsOverlap({ x: p.x, y: p.y - nudge, w: PW, h: PH }, plat)) {
+              let blocked = false;
+              for (const other of allSolids) { if (rectsOverlap({ x: p.x, y: p.y - nudge, w: PW, h: PH }, other)) { blocked = true; break; } }
+              if (!blocked) { p.y -= nudge; popped = true; break; }
+            }
+          }
+          if (popped) continue;
+        }
+        if (p.vx > 0) p.x = plat.x - PW; else if (p.vx < 0) p.x = plat.x + plat.w;
+        p.vx = 0;
+      }
+    }
 
     p.y += p.vy; p.grounded = false;
     for (const plat of allSolids) {
@@ -822,17 +851,36 @@ export default function Game() {
           p.y = plat.y - PH; p.grounded = true; p.canDash = true; p.dashCount = 0;
           p.hairColor = getHairColor(gs);
           if (p.vy > 4) { spawnParticles(gs, p.x + PW / 2, p.y + PH, "rgba(255,255,255,0.4)", 3); sfx("land"); }
-        } else if (p.vy < 0) { p.y = plat.y + plat.h; }
-        p.vy = 0;
+        } else if (p.vy < 0) {
+          // Jump corner correction — nudge player sideways if hitting a corner
+          let corrected = false;
+          for (let nudge = 1; nudge <= CORNER_CORRECTION; nudge++) {
+            // Try nudging right
+            if (!rectsOverlap({ x: p.x + nudge, y: p.y, w: PW, h: PH }, plat)) {
+              let blocked = false;
+              for (const other of allSolids) { if (rectsOverlap({ x: p.x + nudge, y: p.y, w: PW, h: PH }, other)) { blocked = true; break; } }
+              if (!blocked) { p.x += nudge; corrected = true; break; }
+            }
+            // Try nudging left
+            if (!rectsOverlap({ x: p.x - nudge, y: p.y, w: PW, h: PH }, plat)) {
+              let blocked = false;
+              for (const other of allSolids) { if (rectsOverlap({ x: p.x - nudge, y: p.y, w: PW, h: PH }, other)) { blocked = true; break; } }
+              if (!blocked) { p.x -= nudge; corrected = true; break; }
+            }
+          }
+          if (!corrected) { p.y = plat.y + plat.h; p.vy = 0; }
+        } else {
+          p.vy = 0;
+        }
       }
     }
 
-    // Walls
+    // Walls (wider forgiveness window — can wall-jump from WALL_JUMP_FORGIVENESS pixels away)
     p.wallDir = 0;
     if (!p.grounded) {
       for (const plat of allSolids) {
-        if (rectsOverlap({ x: p.x - 2, y: p.y + 2, w: 2, h: PH - 4 }, plat) && left) p.wallDir = -1;
-        if (rectsOverlap({ x: p.x + PW, y: p.y + 2, w: 2, h: PH - 4 }, plat) && right) p.wallDir = 1;
+        if (rectsOverlap({ x: p.x - WALL_JUMP_FORGIVENESS, y: p.y + 2, w: WALL_JUMP_FORGIVENESS, h: PH - 4 }, plat) && left) p.wallDir = -1;
+        if (rectsOverlap({ x: p.x + PW, y: p.y + 2, w: WALL_JUMP_FORGIVENESS, h: PH - 4 }, plat) && right) p.wallDir = 1;
       }
     }
 
@@ -876,11 +924,26 @@ export default function Game() {
     // Fall
     if (p.y > H + 20 || p.y < -40 || p.x < -20 || p.x > W + 20) { killPlayer(gs); prevKeysRef.current = new Set(keys); return; }
 
-    // Room transition
+    // Room transition animation
+    if (gs.transitionTimer > 0) {
+      gs.transitionTimer--;
+      if (gs.transitionTimer === 10 && gs.transitionDir === 1) {
+        // Midpoint: switch room at peak darkness
+        if (gs.currentRoom < gs.rooms.length - 1) {
+          enterRoom(gs, gs.currentRoom + 1);
+        }
+        gs.transitionDir = -1; // start fading in
+      }
+      prevKeysRef.current = new Set(keys);
+      return; // freeze gameplay during transition
+    }
+
+    // Room transition trigger
     if (p.x >= room.exitX && p.grounded) {
       gs.coins += 1; sfx("coin");
       if (gs.currentRoom < gs.rooms.length - 1) {
-        enterRoom(gs, gs.currentRoom + 1); sfx("roomenter");
+        gs.transitionTimer = 20; gs.transitionDir = 1; // start fade out
+        sfx("roomenter");
       } else {
         gs.coins += 5;
         gs.status = "win"; setStatus("win"); sfx("win"); stopBGM();
@@ -918,6 +981,17 @@ export default function Game() {
     drawCheckpoint(ctx, gs.checkpoint, gs.time);
     drawParticles(ctx, gs.particles); drawPlayer2(ctx, gs.player, gs.time, gs);
     drawHUD(ctx, gs);
+
+    // Room transition fade overlay
+    if (gs.transitionTimer > 0) {
+      const progress = gs.transitionDir === 1
+        ? (20 - gs.transitionTimer) / 10  // fading out: 0 → 1
+        : gs.transitionTimer / 10;         // fading in: 1 → 0
+      const alpha = Math.min(1, Math.max(0, progress));
+      ctx.fillStyle = `rgba(0,0,0,${alpha})`;
+      ctx.fillRect(-10, -10, W + 20, H + 20);
+    }
+
     ctx.restore();
   }, []);
 
