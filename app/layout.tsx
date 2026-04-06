@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Summit - Celeste-Inspired Platformer",
+  title: "Ascent - Celeste-Inspired Platformer",
   description: "A precision platformer with dash, wall-jump, and screen-by-screen rooms",
 };
 

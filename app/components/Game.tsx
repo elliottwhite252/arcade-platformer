@@ -1010,7 +1010,7 @@ export default function Game() {
         {status === "menu" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 rounded-lg">
             <div className="mb-2 text-6xl">🏔️</div>
-            <h1 className="text-5xl font-bold text-cyan-400 mb-1 tracking-widest" style={{ fontFamily: "monospace", textShadow: "0 0 20px rgba(100,200,255,0.5)" }}>SUMMIT</h1>
+            <h1 className="text-5xl font-bold text-cyan-400 mb-1 tracking-widest" style={{ fontFamily: "monospace", textShadow: "0 0 20px rgba(100,200,255,0.5)" }}>ASCENT</h1>
             <p className="text-indigo-300 mb-6 text-sm tracking-wider">REACH THE TOP</p>
             <div className="flex gap-3 mb-4">
               <button onClick={initGame} className="px-8 py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-lg rounded transition-colors" style={{ fontFamily: "monospace" }}>CLIMB</button>
@@ -1036,7 +1036,7 @@ export default function Game() {
         {status === "win" && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 rounded-lg">
             <div className="mb-2 text-5xl">⛰️</div>
-            <h2 className="text-4xl font-bold text-cyan-400 mb-4" style={{ fontFamily: "monospace", textShadow: "0 0 20px rgba(100,200,255,0.5)" }}>SUMMIT REACHED</h2>
+            <h2 className="text-4xl font-bold text-cyan-400 mb-4" style={{ fontFamily: "monospace", textShadow: "0 0 20px rgba(100,200,255,0.5)" }}>ASCENT REACHED</h2>
             <div className="text-gray-300 text-sm space-y-2 mb-4" style={{ fontFamily: "monospace" }}>
               <p>Deaths: <span className="text-red-400">{gs?.deaths || 0}</span></p>
               <p>Strawberries: <span className="text-red-400">{gs?.strawberriesCollected || 0}/{gs?.totalStrawberries || 0}</span></p>
