@@ -315,106 +315,82 @@ const MELODIES = [
 ];
 
 let bgmPlaying = false;
-let bgmTimeout: ReturnType<typeof setTimeout> | null = null;
+let bgmSource: AudioBufferSourceNode | null = null;
+let bgmGain: GainNode | null = null;
 
-// Use a completely separate AudioContext for BGM so we can nuke it on stop
-let bgmCtx: AudioContext | null = null;
-
-function startBGM() {
-  if (bgmPlaying || musicMuted) return;
-  stopBGM(); // kill any leftover audio
-
-  bgmPlaying = true;
-  bgmCtx = new AudioContext();
-  const master = bgmCtx.createGain();
-  master.gain.value = 0.06;
-  // Add a compressor/limiter to prevent clipping
-  const compressor = bgmCtx.createDynamicsCompressor();
-  compressor.threshold.value = -10;
-  compressor.ratio.value = 12;
-  compressor.attack.value = 0.003;
-  compressor.release.value = 0.1;
-  master.connect(compressor);
-  compressor.connect(bgmCtx.destination);
-
+// Generate the entire BGM loop as a single AudioBuffer — no real-time oscillators
+function generateBGMBuffer(): AudioBuffer {
+  const ctx = getAudioCtx();
+  const SR = ctx.sampleRate;
   const BPM = 120;
   const beatDur = 60 / BPM;
   const barDur = beatDur * 4;
   const loopDur = barDur * 4;
+  const len = Math.floor(SR * loopDur);
+  const buf = ctx.createBuffer(1, len, SR);
+  const data = buf.getChannelData(0);
 
-  function scheduleLoop() {
-    if (!bgmPlaying || !bgmCtx) return;
-    const now = bgmCtx.currentTime + 0.05;
+  const sq = (t: number, f: number) => Math.sin(2 * Math.PI * f * t) > 0 ? 1 : -1;
+  const tri = (t: number, f: number) => { const p = (t * f) % 1; return 4 * Math.abs(p - 0.5) - 1; };
+  const sin = (t: number, f: number) => Math.sin(2 * Math.PI * f * t);
 
-    for (let ci = 0; ci < 4; ci++) {
-      const chord = CHORD_PROG[ci];
-      const barStart = now + ci * barDur;
+  for (let i = 0; i < len; i++) {
+    const t = i / SR;
+    const barIdx = Math.floor(t / barDur) % 4;
+    const barT = t - barIdx * barDur;
+    const chord = CHORD_PROG[barIdx];
+    const melody = MELODIES[barIdx];
+    const eighthIdx = Math.floor(barT / (beatDur / 2)) % 8;
+    const noteT = barT % (beatDur / 2);
+    const noteEnv = Math.max(0, 1 - noteT / (beatDur / 2 - 0.03));
 
-      // Bass (triangle wave)
-      const bass = bgmCtx.createOscillator();
-      const bg = bgmCtx.createGain();
-      bass.type = "triangle";
-      bass.frequency.value = chord.root;
-      bg.gain.setValueAtTime(0.1, barStart);
-      bg.gain.linearRampToValueAtTime(0, barStart + barDur - 0.01);
-      bass.connect(bg); bg.connect(master);
-      bass.start(barStart); bass.stop(barStart + barDur);
-
-      // Arpeggio
-      for (let n = 0; n < 8; n++) {
-        const ns = barStart + n * (beatDur / 2);
-        const arp = bgmCtx.createOscillator();
-        const ag = bgmCtx.createGain();
-        arp.type = "square";
-        arp.frequency.value = chord.notes[n % chord.notes.length];
-        ag.gain.setValueAtTime(0.025, ns);
-        ag.gain.linearRampToValueAtTime(0, ns + beatDur / 2 - 0.03);
-        arp.connect(ag); ag.connect(master);
-        arp.start(ns); arp.stop(ns + beatDur / 2);
-      }
-
-      // Melody
-      const melody = MELODIES[ci];
-      for (let n = 0; n < melody.length; n++) {
-        const ns = barStart + n * (beatDur / 2);
-        const mel = bgmCtx.createOscillator();
-        const mg = bgmCtx.createGain();
-        mel.type = "square";
-        mel.frequency.value = melody[n];
-        mg.gain.setValueAtTime(0.04, ns);
-        mg.gain.linearRampToValueAtTime(0, ns + beatDur / 2 - 0.03);
-        mel.connect(mg); mg.connect(master);
-        mel.start(ns); mel.stop(ns + beatDur / 2);
-      }
-
-      // Kick
-      for (let beat = 0; beat < 4; beat += 2) {
-        const kt = barStart + beat * beatDur;
-        const ko = bgmCtx.createOscillator();
-        const kg = bgmCtx.createGain();
-        ko.type = "sine";
-        ko.frequency.setValueAtTime(150, kt);
-        ko.frequency.exponentialRampToValueAtTime(40, kt + 0.08);
-        kg.gain.setValueAtTime(0.1, kt);
-        kg.gain.linearRampToValueAtTime(0, kt + 0.08);
-        ko.connect(kg); kg.connect(master);
-        ko.start(kt); ko.stop(kt + 0.1);
+    let s = 0;
+    // Bass
+    s += tri(t, chord.root) * 0.08;
+    // Arpeggio
+    s += sq(t, chord.notes[eighthIdx % chord.notes.length]) * noteEnv * 0.025;
+    // Melody
+    s += sq(t, melody[eighthIdx]) * noteEnv * 0.04;
+    // Kick on beats 1 and 3
+    const beatInBar = Math.floor(barT / beatDur);
+    if (beatInBar % 2 === 0) {
+      const kickT = barT - beatInBar * beatDur;
+      if (kickT < 0.08) {
+        const kf = 150 - (150 - 40) * (kickT / 0.08);
+        s += sin(kickT, kf) * (1 - kickT / 0.08) * 0.1;
       }
     }
 
-    bgmTimeout = setTimeout(scheduleLoop, loopDur * 1000 - 200);
+    data[i] = Math.max(-0.8, Math.min(0.8, s));
   }
 
-  scheduleLoop();
+  return buf;
+}
+
+let bgmBuffer: AudioBuffer | null = null;
+
+function startBGM() {
+  if (bgmPlaying || musicMuted) return;
+  stopBGM();
+  try {
+    const ctx = getAudioCtx();
+    if (!bgmBuffer) bgmBuffer = generateBGMBuffer();
+    bgmSource = ctx.createBufferSource();
+    bgmSource.buffer = bgmBuffer;
+    bgmSource.loop = true;
+    bgmGain = ctx.createGain();
+    bgmGain.gain.value = 0.5;
+    bgmSource.connect(bgmGain);
+    bgmGain.connect(ctx.destination);
+    bgmSource.start();
+    bgmPlaying = true;
+  } catch { /* ignore */ }
 }
 
 function stopBGM() {
   bgmPlaying = false;
-  if (bgmTimeout) { clearTimeout(bgmTimeout); bgmTimeout = null; }
-  if (bgmCtx) {
-    try { bgmCtx.close(); } catch { /* */ }
-    bgmCtx = null;
-  }
+  if (bgmSource) { try { bgmSource.stop(); bgmSource.disconnect(); } catch { /* */ } bgmSource = null; }
+  if (bgmGain) { try { bgmGain.disconnect(); } catch { /* */ } bgmGain = null; }
 }
 
 // ─── Drawing ─────────────────────────────────────────────────────────────────
