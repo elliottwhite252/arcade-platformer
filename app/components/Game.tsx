@@ -605,9 +605,10 @@ export default function Game() {
 
     // Death-triggered offer: every 3 deaths in a room, if no active booster and has coins
     if (gs.roomDeaths % 3 === 0 && !gs.activeBooster && gs.coins >= 3) {
-      // Pick the best booster to offer based on room deaths
-      const offer: BoosterType = gs.roomDeaths >= 9 ? "shield" :
-        gs.roomDeaths >= 6 ? "doubleDash" : "shield";
+      // Offer cheapest affordable booster first, escalate with more deaths
+      let offer: BoosterType = "slowmo"; // 3 coins — cheapest
+      if (gs.coins >= 5 && gs.roomDeaths >= 6) offer = "checkpoint";
+      if (gs.coins >= 8 && gs.roomDeaths >= 9) offer = "shield";
       gs.offerBooster = offer;
       // Show offer after respawn (delay via deadTimer)
       p.deadTimer = 25; // slightly longer to let particles settle
